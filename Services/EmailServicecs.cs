@@ -30,7 +30,8 @@ namespace MeetingScheduler.API.Services
             using var client = new SmtpClient(smtpHost, smtpPort)
             {
                 Credentials = new NetworkCredential(senderEmail, senderPassword),
-                EnableSsl = true
+                EnableSsl = true,
+                Timeout = 20000
             };
 
             var mailMessage = new MailMessage
@@ -45,7 +46,13 @@ namespace MeetingScheduler.API.Services
 
             try
             {
-                await client.SendMailAsync(mailMessage);
+                var sendTask = client.SendMailAsync(mailMessage);
+                if (await Task.WhenAny(sendTask, Task.Delay(TimeSpan.FromSeconds(20))) != sendTask)
+                {
+                    throw new TimeoutException("The SMTP server did not respond within 20 seconds.");
+                }
+
+                await sendTask;
                 _logger.LogInformation("Email sent to {Recipient}", toEmail);
             }
             catch (Exception ex)
