@@ -88,8 +88,7 @@ namespace MeetingScheduler.API.Controllers
             return Ok(new
             {
                 message = "Registered successfully. Please check your email for a verification code.",
-                email = user.Email,
-                verificationCode
+                email = user.Email
             });
         }
 
@@ -146,7 +145,7 @@ namespace MeetingScheduler.API.Controllers
             await _context.SaveChangesAsync();
 
             _ = _emailService.SendEmailAsync(user.Email!, "Verify your SyncUp account", $"Your verification code is: {verificationCode}");
-            return Ok(new { message = "Verification code generated successfully.", verificationCode });
+            return Ok(new { message = "Verification code sent successfully." });
         }
 
         [HttpPost("login")]
@@ -223,7 +222,7 @@ namespace MeetingScheduler.API.Controllers
             return Ok(new
             {
                 message = "Reset code generated successfully.",
-                resetCode
+                email = user.Email
             });
         }
 
