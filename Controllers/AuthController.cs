@@ -170,7 +170,14 @@ namespace MeetingScheduler.API.Controllers
                 return NotFound("No account was found with this email address.");
             }
 
-            var resetCode = new Random().Next(100000, 999999).ToString();
+            var now = DateTime.UtcNow;
+            var resetCode = user.VerificationCode;
+            if (string.IsNullOrEmpty(resetCode) || user.ResetCodeExpiresAt <= now)
+            {
+                resetCode = new Random().Next(100000, 999999).ToString();
+                user.ResetCodeExpiresAt = now.AddMinutes(5);
+            }
+
             user.VerificationCode = resetCode;
             await _context.SaveChangesAsync();
 
@@ -197,13 +204,15 @@ namespace MeetingScheduler.API.Controllers
         {
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
 
-            if (user == null || user.VerificationCode != request.Code)
+            if (user == null || user.VerificationCode != request.Code ||
+                user.ResetCodeExpiresAt == null || user.ResetCodeExpiresAt <= DateTime.UtcNow)
             {
-                return BadRequest("Invalid reset code.");
+                return BadRequest("Invalid or expired reset code.");
             }
 
             user.Password = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
             user.VerificationCode = null;
+            user.ResetCodeExpiresAt = null;
             await _context.SaveChangesAsync();
 
             return Ok("Password reset successfully.");
