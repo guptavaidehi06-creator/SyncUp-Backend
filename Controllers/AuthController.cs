@@ -25,6 +25,13 @@ namespace MeetingScheduler.API.Controllers
         public string Code { get; set; } = "";
     }
 
+    public class ResetPasswordRequest
+    {
+        public string Email { get; set; } = "";
+        public string Code { get; set; } = "";
+        public string NewPassword { get; set; } = "";
+    }
+
     [ApiController]
     [Route("api/[controller]")]
     public class AuthController : ControllerBase
@@ -81,7 +88,8 @@ namespace MeetingScheduler.API.Controllers
             return Ok(new
             {
                 message = "Registered successfully. Please check your email for a verification code.",
-                email = user.Email
+                email = user.Email,
+                verificationCode
             });
         }
 
@@ -150,6 +158,55 @@ namespace MeetingScheduler.API.Controllers
                 token,
                 user = new { user.Id, user.Name, user.Email, user.IsAdmin }
             });
+        }
+
+        [HttpPost("forgot-password")]
+        public async Task<IActionResult> ForgotPassword(VerifyRequest request)
+        {
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
+
+            if (user == null)
+            {
+                return NotFound("No account was found with this email address.");
+            }
+
+            var resetCode = new Random().Next(100000, 999999).ToString();
+            user.VerificationCode = resetCode;
+            await _context.SaveChangesAsync();
+
+            var subject = "Reset your SyncUp password";
+            var body = $@"
+                <h2>Hi {user.Name},</h2>
+                <p>Your password reset code is:</p>
+                <h1 style='letter-spacing: 4px;'>{resetCode}</h1>
+                <p>Use this code to reset your password.</p>
+                <br>
+                <p>Thanks,<br>SyncUp Team</p>
+            ";
+
+            _ = _emailService.SendEmailAsync(user.Email!, subject, body);
+            return Ok(new
+            {
+                message = "Reset code generated successfully.",
+                resetCode
+            });
+        }
+
+        [HttpPost("reset-password")]
+        public async Task<IActionResult> ResetPassword(ResetPasswordRequest request)
+        {
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
+
+            if (user == null || user.VerificationCode != request.Code)
+            {
+                return BadRequest("Invalid reset code.");
+            }
+
+            user.Password = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+            user.VerificationCode = null;
+            await _context.SaveChangesAsync();
+
+            return Ok("Password reset successfully.");
         }
 
         [HttpPost("fix-password/{userId}")]
