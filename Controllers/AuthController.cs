@@ -171,14 +171,19 @@ namespace MeetingScheduler.API.Controllers
             }
 
             var now = DateTime.UtcNow;
-            var resetCode = user.VerificationCode;
-            if (string.IsNullOrEmpty(resetCode) || user.ResetCodeExpiresAt <= now)
+            var storedResetParts = user.VerificationCode?.Split('|', 2);
+            var resetCode = storedResetParts?.Length == 2 ? storedResetParts[0] : null;
+            var resetExpiry = storedResetParts?.Length == 2 && DateTime.TryParse(storedResetParts[1], out var parsedExpiry)
+                ? parsedExpiry
+                : DateTime.MinValue;
+
+            if (string.IsNullOrEmpty(resetCode) || resetExpiry <= now)
             {
                 resetCode = new Random().Next(100000, 999999).ToString();
-                user.ResetCodeExpiresAt = now.AddMinutes(5);
+                resetExpiry = now.AddMinutes(5);
             }
 
-            user.VerificationCode = resetCode;
+            user.VerificationCode = $"{resetCode}|{resetExpiry:O}";
             await _context.SaveChangesAsync();
 
             var subject = "Reset your SyncUp password";
@@ -204,15 +209,19 @@ namespace MeetingScheduler.API.Controllers
         {
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
 
-            if (user == null || user.VerificationCode != request.Code ||
-                user.ResetCodeExpiresAt == null || user.ResetCodeExpiresAt <= DateTime.UtcNow)
+            var resetParts = user?.VerificationCode?.Split('|', 2);
+            var resetExpiry = resetParts?.Length == 2 && DateTime.TryParse(resetParts[1], out var parsedExpiry)
+                ? parsedExpiry
+                : DateTime.MinValue;
+
+            if (user == null || resetParts?.Length != 2 || resetParts[0] != request.Code ||
+                resetExpiry <= DateTime.UtcNow)
             {
                 return BadRequest("Invalid or expired reset code.");
             }
 
             user.Password = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
             user.VerificationCode = null;
-            user.ResetCodeExpiresAt = null;
             await _context.SaveChangesAsync();
 
             return Ok("Password reset successfully.");

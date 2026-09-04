@@ -9,7 +9,6 @@ namespace MeetingScheduler.API.Models
         public bool IsAdmin { get; set; } = false;
         public bool IsVerified { get; set; } = false;
         public string? VerificationCode { get; set; }
-        public DateTime? ResetCodeExpiresAt { get; set; }
         public DateTime? CreatedAt { get; set; } = DateTime.Now;
     }
 }
