@@ -126,6 +126,29 @@ namespace MeetingScheduler.API.Controllers
             });
         }
 
+        [HttpPost("resend-verification")]
+        public async Task<IActionResult> ResendVerification(VerifyRequest request)
+        {
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
+
+            if (user == null)
+            {
+                return NotFound("User not found.");
+            }
+
+            if (user.IsVerified)
+            {
+                return BadRequest("Account is already verified.");
+            }
+
+            var verificationCode = new Random().Next(100000, 999999).ToString();
+            user.VerificationCode = verificationCode;
+            await _context.SaveChangesAsync();
+
+            _ = _emailService.SendEmailAsync(user.Email!, "Verify your SyncUp account", $"Your verification code is: {verificationCode}");
+            return Ok(new { message = "Verification code generated successfully.", verificationCode });
+        }
+
         [HttpPost("login")]
         public async Task<IActionResult> Login(LoginRequest request)
         {
