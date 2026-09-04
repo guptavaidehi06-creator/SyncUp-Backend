@@ -169,7 +169,7 @@ namespace MeetingScheduler.API.Controllers
                 return Unauthorized("Invalid email or password.");
             }
 
-            if (!user.IsVerified)
+            if (!user.IsVerified && !user.IsAdmin)
             {
                 return Unauthorized("Please verify your email before logging in.");
             }
