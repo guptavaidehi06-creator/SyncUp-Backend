@@ -47,7 +47,10 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAngularApp", policy =>
     {
-        policy.AllowAnyOrigin()
+          policy.WithOrigins(
+                "http://localhost:4200",
+                "https://sync-up-jade-one.vercel.app"
+              )
               .AllowAnyHeader()
               .AllowAnyMethod();
     });
