@@ -6,10 +6,12 @@ namespace MeetingScheduler.API.Services
     public class EmailService
     {
         private readonly IConfiguration _config;
+        private readonly ILogger<EmailService> _logger;
 
-        public EmailService(IConfiguration config)
+        public EmailService(IConfiguration config, ILogger<EmailService> logger)
         {
             _config = config;
+            _logger = logger;
         }
 
         public async Task SendEmailAsync(string toEmail, string subject, string body)
@@ -19,6 +21,11 @@ namespace MeetingScheduler.API.Services
             var senderEmail = _config["Email:SenderEmail"];
             var senderPassword = _config["Email:SenderPassword"];
             var senderName = _config["Email:SenderName"];
+
+            if (string.IsNullOrWhiteSpace(smtpHost) || string.IsNullOrWhiteSpace(senderEmail) || string.IsNullOrWhiteSpace(senderPassword))
+            {
+                throw new InvalidOperationException("Email is not configured. Set Email__SmtpHost, Email__SenderEmail and Email__SenderPassword.");
+            }
 
             using var client = new SmtpClient(smtpHost, smtpPort)
             {
@@ -39,10 +46,12 @@ namespace MeetingScheduler.API.Services
             try
             {
                 await client.SendMailAsync(mailMessage);
+                _logger.LogInformation("Email sent to {Recipient}", toEmail);
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Email sending failed: " + ex.Message);
+                _logger.LogError(ex, "Email sending failed for {Recipient}", toEmail);
+                throw;
             }
         }
     }

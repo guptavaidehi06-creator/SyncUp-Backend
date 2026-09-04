@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using MeetingScheduler.API.Data;
 using MeetingScheduler.API.Models;
 using MeetingScheduler.API.Services;
+using System.Security.Cryptography;
+using System.Text.Encodings.Web;
 
 namespace MeetingScheduler.API.Controllers
 {
@@ -25,6 +27,10 @@ namespace MeetingScheduler.API.Controllers
         public string Code { get; set; } = "";
     }
 
+    public class ForgotPasswordRequest
+    {
+        public string Email { get; set; } = "";
+    }
     public class ResetPasswordRequest
     {
         public string Email { get; set; } = "";
@@ -56,8 +62,13 @@ namespace MeetingScheduler.API.Controllers
                 return BadRequest("An account with this email already exists.");
             }
 
+            if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Email) || request.Password.Length < 8)
+            {
+                return BadRequest("Name, email, and a password of at least 8 characters are required.");
+            }
+
             var hashedPassword = BCrypt.Net.BCrypt.HashPassword(request.Password);
-            var verificationCode = new Random().Next(100000, 999999).ToString();
+            var verificationCode = GenerateCode();
 
             var user = new User
             {
@@ -67,29 +78,53 @@ namespace MeetingScheduler.API.Controllers
                 IsAdmin = false,
                 IsVerified = false,
                 VerificationCode = verificationCode,
-                CreatedAt = DateTime.Now
+                VerificationCodeExpiry = DateTime.UtcNow.AddMinutes(15),
+                CreatedAt = DateTime.UtcNow
             };
 
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
 
-            var subject = "Verify your SyncUp account";
-            var body = $@"
-                <h2>Hi {user.Name},</h2>
-                <p>Your verification code is:</p>
-                <h1 style='letter-spacing: 4px;'>{verificationCode}</h1>
-                <p>Enter this code to activate your account.</p>
-                <br>
-                <p>Thanks,<br>SyncUp Team</p>
-            ";
-
-            _ = _emailService.SendEmailAsync(user.Email!, subject, body);
+            try
+            {
+                await SendVerificationEmailAsync(user);
+            }
+            catch
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                    "Your account was created, but we could not send the verification email. Please try resend verification shortly.");
+            }
 
             return Ok(new
             {
                 message = "Registered successfully. Please check your email for a verification code.",
                 email = user.Email
             });
+        }
+
+        [HttpPost("resend-verification")]
+        public async Task<IActionResult> ResendVerification(ForgotPasswordRequest request)
+        {
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
+            if (user == null || user.IsVerified)
+            {
+                return Ok("If the account needs verification, a new code has been sent.");
+            }
+
+            user.VerificationCode = GenerateCode();
+            user.VerificationCodeExpiry = DateTime.UtcNow.AddMinutes(15);
+            await _context.SaveChangesAsync();
+
+            try
+            {
+                await SendVerificationEmailAsync(user);
+            }
+            catch
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, "Unable to send email right now. Please try again shortly.");
+            }
+
+            return Ok("A new verification code has been sent.");
         }
 
         [HttpPost("verify")]
@@ -107,6 +142,11 @@ namespace MeetingScheduler.API.Controllers
                 return Ok("Account already verified.");
             }
 
+            if (user.VerificationCodeExpiry == null || user.VerificationCodeExpiry < DateTime.UtcNow)
+            {
+                return BadRequest("This code has expired. Please request a new one.");
+            }
+
             if (user.VerificationCode != request.Code)
             {
                 return BadRequest("Invalid verification code.");
@@ -114,6 +154,7 @@ namespace MeetingScheduler.API.Controllers
 
             user.IsVerified = true;
             user.VerificationCode = null;
+            user.VerificationCodeExpiry = null;
             await _context.SaveChangesAsync();
 
             var token = _jwtService.GenerateToken(user);
@@ -123,29 +164,6 @@ namespace MeetingScheduler.API.Controllers
                 token,
                 user = new { user.Id, user.Name, user.Email, user.IsAdmin }
             });
-        }
-
-        [HttpPost("resend-verification")]
-        public async Task<IActionResult> ResendVerification(VerifyRequest request)
-        {
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
-
-            if (user == null)
-            {
-                return NotFound("User not found.");
-            }
-
-            if (user.IsVerified)
-            {
-                return BadRequest("Account is already verified.");
-            }
-
-            var verificationCode = new Random().Next(100000, 999999).ToString();
-            user.VerificationCode = verificationCode;
-            await _context.SaveChangesAsync();
-
-            _ = _emailService.SendEmailAsync(user.Email!, "Verify your SyncUp account", $"Your verification code is: {verificationCode}");
-            return Ok(new { message = "Verification code sent successfully." });
         }
 
         [HttpPost("login")]
@@ -183,29 +201,17 @@ namespace MeetingScheduler.API.Controllers
         }
 
         [HttpPost("forgot-password")]
-        public async Task<IActionResult> ForgotPassword(VerifyRequest request)
+        public async Task<IActionResult> ForgotPassword(ForgotPasswordRequest request)
         {
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
-
             if (user == null)
             {
-                return NotFound("No account was found with this email address.");
+                return Ok("If this email exists, a reset code has been sent.");
             }
 
-            var now = DateTime.UtcNow;
-            var storedResetParts = user.VerificationCode?.Split('|', 2);
-            var resetCode = storedResetParts?.Length == 2 ? storedResetParts[0] : null;
-            var resetExpiry = storedResetParts?.Length == 2 && DateTime.TryParse(storedResetParts[1], out var parsedExpiry)
-                ? parsedExpiry
-                : DateTime.MinValue;
-
-            if (string.IsNullOrEmpty(resetCode) || resetExpiry <= now)
-            {
-                resetCode = new Random().Next(100000, 999999).ToString();
-                resetExpiry = now.AddMinutes(5);
-            }
-
-            user.VerificationCode = $"{resetCode}|{resetExpiry:O}";
+            var resetCode = GenerateCode();
+            user.VerificationCode = resetCode;
+            user.VerificationCodeExpiry = DateTime.UtcNow.AddMinutes(15);
             await _context.SaveChangesAsync();
 
             var subject = "Reset your SyncUp password";
@@ -213,17 +219,21 @@ namespace MeetingScheduler.API.Controllers
                 <h2>Hi {user.Name},</h2>
                 <p>Your password reset code is:</p>
                 <h1 style='letter-spacing: 4px;'>{resetCode}</h1>
-                <p>Use this code to reset your password.</p>
+                <p>This code expires in 15 minutes.</p>
                 <br>
                 <p>Thanks,<br>SyncUp Team</p>
             ";
 
-            _ = _emailService.SendEmailAsync(user.Email!, subject, body);
-            return Ok(new
+            try
             {
-                message = "Reset code generated successfully.",
-                email = user.Email
-            });
+                await _emailService.SendEmailAsync(user.Email!, subject, body);
+            }
+            catch
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, "Unable to send the reset email right now. Please try again shortly.");
+            }
+
+            return Ok("If this email exists, a reset code has been sent.");
         }
 
         [HttpPost("reset-password")]
@@ -231,37 +241,45 @@ namespace MeetingScheduler.API.Controllers
         {
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
 
-            var resetParts = user?.VerificationCode?.Split('|', 2);
-            var resetExpiry = resetParts?.Length == 2 && DateTime.TryParse(resetParts[1], out var parsedExpiry)
-                ? parsedExpiry
-                : DateTime.MinValue;
+            if (user == null)
+            {
+                return BadRequest("Invalid or expired reset code.");
+            }
 
-            if (user == null || resetParts?.Length != 2 || resetParts[0] != request.Code ||
-                resetExpiry <= DateTime.UtcNow)
+            if (user.VerificationCodeExpiry == null || user.VerificationCodeExpiry < DateTime.UtcNow)
+            {
+                return BadRequest("This code has expired. Please request a new one.");
+            }
+
+            if (user.VerificationCode != request.Code)
             {
                 return BadRequest("Invalid or expired reset code.");
             }
 
             user.Password = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
             user.VerificationCode = null;
+            user.VerificationCodeExpiry = null;
             await _context.SaveChangesAsync();
 
-            return Ok("Password reset successfully.");
+            return Ok("Password reset successfully. You can now log in.");
         }
 
-        [HttpPost("fix-password/{userId}")]
-        public async Task<IActionResult> FixPassword(int userId, [FromBody] string newPassword)
+        private static string GenerateCode() => RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
+
+        private async Task SendVerificationEmailAsync(User user)
         {
-            var user = await _context.Users.FindAsync(userId);
-            if (user == null)
-            {
-                return NotFound("User not found.");
-            }
+            var safeName = HtmlEncoder.Default.Encode(user.Name ?? "there");
+            var subject = "Verify your SyncUp account";
+            var body = $@"
+                <h2>Hi {safeName},</h2>
+                <p>Your verification code is:</p>
+                <h1 style='letter-spacing: 4px;'>{user.VerificationCode}</h1>
+                <p>This code expires in 15 minutes.</p>
+                <br>
+                <p>Thanks,<br>SyncUp Team</p>
+            ";
 
-            user.Password = BCrypt.Net.BCrypt.HashPassword(newPassword);
-            await _context.SaveChangesAsync();
-
-            return Ok("Password updated and hashed successfully.");
+            await _emailService.SendEmailAsync(user.Email!, subject, body);
         }
     }
 }

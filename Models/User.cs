@@ -10,5 +10,6 @@ namespace MeetingScheduler.API.Models
         public bool IsVerified { get; set; } = false;
         public string? VerificationCode { get; set; }
         public DateTime? CreatedAt { get; set; } = DateTime.Now;
+        public DateTime? VerificationCodeExpiry { get; set; }
     }
 }

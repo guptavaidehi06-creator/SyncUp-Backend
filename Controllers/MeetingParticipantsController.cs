@@ -12,11 +12,13 @@ namespace MeetingScheduler.API.Controllers
     {
         private readonly AppDbContext _context;
         private readonly EmailService _emailService;
+        private readonly IConfiguration _configuration;
 
-        public MeetingParticipantsController(AppDbContext context, EmailService emailService)
+        public MeetingParticipantsController(AppDbContext context, EmailService emailService, IConfiguration configuration)
         {
             _context = context;
             _emailService = emailService;
+            _configuration = configuration;
         }
 
         [HttpGet]
@@ -42,13 +44,15 @@ namespace MeetingScheduler.API.Controllers
             _context.MeetingParticipants.Add(participant);
             await _context.SaveChangesAsync();
 
-            // Send invite email (fire and forget - doesn't block the response)
+            // Send the invite only after the participant and meeting have been validated.
             var user = await _context.Users.FindAsync(participant.UserId);
             var meeting = await _context.Meetings.FindAsync(participant.MeetingId);
 
             if (user != null && meeting != null && !string.IsNullOrEmpty(user.Email))
             {
-                var inviteLink = $"http://localhost:4200/submit-availability/{meeting.Id}";
+                var clientBaseUrl = _configuration["Client:BaseUrl"];
+                clientBaseUrl = string.IsNullOrWhiteSpace(clientBaseUrl) ? "http://localhost:4200" : clientBaseUrl.TrimEnd('/');
+                var inviteLink = $"{clientBaseUrl}/submit-availability/{meeting.Id}";
                 var subject = $"You're invited: {meeting.Title}";
                 var body = $@"
                     <h2>Hi {user.Name},</h2>
@@ -60,7 +64,15 @@ namespace MeetingScheduler.API.Controllers
                     <p>Thanks,<br>SyncUp Team</p>
                 ";
 
-                _ = _emailService.SendEmailAsync(user.Email, subject, body);
+                try
+                {
+                    await _emailService.SendEmailAsync(user.Email, subject, body);
+                }
+                catch
+                {
+                    return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                        "Participant was added, but the invitation email could not be sent. Check the email settings and try again.");
+                }
             }
 
             return Created("api/meetingparticipants/" + participant.Id, participant);
