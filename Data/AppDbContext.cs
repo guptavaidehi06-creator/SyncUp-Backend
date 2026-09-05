@@ -11,5 +11,6 @@ namespace MeetingScheduler.API.Data
 		public DbSet<Availability> Availabilities { get; set; }
 		public DbSet<Meeting> Meetings { get; set; }
 		public DbSet<MeetingParticipant> MeetingParticipants { get; set; }
-	}
+        public DbSet<Notification> Notifications { get; set; }
+    }
 }
