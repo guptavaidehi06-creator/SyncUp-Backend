@@ -1,5 +1,4 @@
-﻿using System.Net;
-using System.Net.Mail;
+﻿using System.Net.Http.Json;
 
 namespace MeetingScheduler.API.Services
 {
@@ -7,13 +6,16 @@ namespace MeetingScheduler.API.Services
     {
         private readonly IConfiguration _config;
         private readonly ILogger<EmailService> _logger;
+        private readonly HttpClient _httpClient;
 
         public EmailService(
             IConfiguration config,
-            ILogger<EmailService> logger)
+            ILogger<EmailService> logger,
+            HttpClient httpClient)
         {
             _config = config;
             _logger = logger;
+            _httpClient = httpClient;
         }
 
         public async Task SendEmailAsync(
@@ -23,17 +25,14 @@ namespace MeetingScheduler.API.Services
         {
             try
             {
-                var smtpHost = _config["Email:SmtpHost"];
-                var smtpPortString = _config["Email:SmtpPort"];
+                var apiKey = _config["Brevo:ApiKey"];
+                var senderEmail = _config["Brevo:SenderEmail"];
+                var senderName = _config["Brevo:SenderName"];
 
-                var senderEmail = _config["Email:SenderEmail"];
-                var senderPassword = _config["Email:SenderPassword"];
-                var senderName = _config["Email:SenderName"];
-
-                if (string.IsNullOrWhiteSpace(smtpHost))
+                if (string.IsNullOrWhiteSpace(apiKey))
                 {
                     throw new InvalidOperationException(
-                        "SMTP Host is missing."
+                        "Brevo API Key is missing."
                     );
                 }
 
@@ -44,57 +43,64 @@ namespace MeetingScheduler.API.Services
                     );
                 }
 
-                if (string.IsNullOrWhiteSpace(senderPassword))
+                var emailData = new
                 {
-                    throw new InvalidOperationException(
-                        "Sender Password is missing."
-                    );
-                }
+                    sender = new
+                    {
+                        name = string.IsNullOrWhiteSpace(senderName)
+                            ? "SyncUp"
+                            : senderName,
 
-                int smtpPort = 587;
+                        email = senderEmail
+                    },
 
-                if (!string.IsNullOrWhiteSpace(smtpPortString))
-                {
-                    smtpPort = int.Parse(smtpPortString);
-                }
+                    to = new[]
+                    {
+                        new
+                        {
+                            email = toEmail
+                        }
+                    },
 
-                _logger.LogInformation(
-                    "Attempting to send email to {Recipient} using SMTP host {Host} and port {Port}",
-                    toEmail,
-                    smtpHost,
-                    smtpPort
+                    subject = subject,
+
+                    htmlContent = body
+                };
+
+                var request = new HttpRequestMessage(
+                    HttpMethod.Post,
+                    "https://api.brevo.com/v3/smtp/email"
                 );
 
-                using var client = new SmtpClient
+                request.Headers.Add(
+                    "api-key",
+                    apiKey
+                );
+
+                request.Content = JsonContent.Create(emailData);
+
+                _logger.LogInformation(
+                    "Attempting to send email to {Recipient} using Brevo API",
+                    toEmail
+                );
+
+                var response =
+                    await _httpClient.SendAsync(request);
+
+                if (!response.IsSuccessStatusCode)
                 {
-                    Host = smtpHost,
-                    Port = smtpPort,
-                    EnableSsl = true,
-                    UseDefaultCredentials = false,
-                    Credentials = new NetworkCredential(
-                        senderEmail,
-                        senderPassword
-                    ),
-                    Timeout = 30000
-                };
+                    var error =
+                        await response.Content.ReadAsStringAsync();
 
-                using var mailMessage = new MailMessage
-                {
-                    From = new MailAddress(
-                        senderEmail,
-                        string.IsNullOrWhiteSpace(senderName)
-                            ? "SyncUp"
-                            : senderName
-                    ),
+                    _logger.LogError(
+                        "Brevo email error: {Error}",
+                        error
+                    );
 
-                    Subject = subject,
-                    Body = body,
-                    IsBodyHtml = true
-                };
-
-                mailMessage.To.Add(toEmail);
-
-                await client.SendMailAsync(mailMessage);
+                    throw new Exception(
+                        $"Email API failed: {error}"
+                    );
+                }
 
                 _logger.LogInformation(
                     "Email sent successfully to {Recipient}",
