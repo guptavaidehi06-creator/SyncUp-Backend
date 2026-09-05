@@ -19,14 +19,17 @@ namespace MeetingScheduler.API.Controllers
         [HttpGet]
         public async Task<IActionResult> GetAllAvailabilities()
         {
-            var availabilities = await _context.Availabilities.ToListAsync();
+            var availabilities = await _context.Availabilities
+                .ToListAsync();
+
             return Ok(availabilities);
         }
 
         [HttpGet("{id}")]
         public async Task<IActionResult> GetAvailabilityById(int id)
         {
-            var availability = await _context.Availabilities.FindAsync(id);
+            var availability = await _context.Availabilities
+                .FindAsync(id);
 
             if (availability == null)
             {
@@ -34,6 +37,16 @@ namespace MeetingScheduler.API.Controllers
             }
 
             return Ok(availability);
+        }
+
+        [HttpGet("meeting/{meetingId}")]
+        public async Task<IActionResult> GetAvailabilityByMeeting(int meetingId)
+        {
+            var availabilities = await _context.Availabilities
+                .Where(a => a.MeetingId == meetingId)
+                .ToListAsync();
+
+            return Ok(availabilities);
         }
 
         [HttpGet("user/{userId}")]
@@ -47,27 +60,49 @@ namespace MeetingScheduler.API.Controllers
         }
 
         [HttpPost]
-        public async Task<IActionResult> AddAvailability(Availability availability)
+        public async Task<IActionResult> AddAvailability(
+            Availability availability)
         {
             _context.Availabilities.Add(availability);
+
             await _context.SaveChangesAsync();
 
-            return Created("api/availability/" + availability.Id, availability);
+            return Created(
+                "api/availability/" + availability.Id,
+                availability
+            );
         }
 
         [HttpPut("{id}")]
-        public async Task<IActionResult> UpdateAvailability(int id, Availability updatedAvailability)
+        public async Task<IActionResult> UpdateAvailability(
+            int id,
+            Availability updatedAvailability)
         {
-            var availability = await _context.Availabilities.FindAsync(id);
+            var availability = await _context.Availabilities
+                .FindAsync(id);
 
             if (availability == null)
             {
                 return NotFound("Availability not found");
             }
 
-            availability.DayOfWeek = updatedAvailability.DayOfWeek;
-            availability.StartTime = updatedAvailability.StartTime;
-            availability.EndTime = updatedAvailability.EndTime;
+            availability.MeetingId =
+                updatedAvailability.MeetingId;
+
+            availability.UserId =
+                updatedAvailability.UserId;
+
+            availability.DayOfWeek =
+                updatedAvailability.DayOfWeek;
+
+            availability.SpecificDate =
+                updatedAvailability.SpecificDate;
+
+            availability.StartTime =
+                updatedAvailability.StartTime;
+
+            availability.EndTime =
+                updatedAvailability.EndTime;
 
             await _context.SaveChangesAsync();
 
@@ -77,7 +112,8 @@ namespace MeetingScheduler.API.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteAvailability(int id)
         {
-            var availability = await _context.Availabilities.FindAsync(id);
+            var availability = await _context.Availabilities
+                .FindAsync(id);
 
             if (availability == null)
             {
@@ -85,9 +121,12 @@ namespace MeetingScheduler.API.Controllers
             }
 
             _context.Availabilities.Remove(availability);
+
             await _context.SaveChangesAsync();
 
-            return Ok("Availability deleted successfully");
+            return Ok(
+                "Availability deleted successfully"
+            );
         }
     }
 }
