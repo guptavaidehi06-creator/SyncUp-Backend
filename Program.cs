@@ -8,83 +8,155 @@ using MeetingScheduler.API.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Railway supplies PORT at runtime. Locally launchSettings.json remains in control.
+// Railway supplies PORT at runtime
 var railwayPort = Environment.GetEnvironmentVariable("PORT");
+
 if (!string.IsNullOrWhiteSpace(railwayPort))
 {
     builder.WebHost.UseUrls($"http://0.0.0.0:{railwayPort}");
 }
 
-// Add services to the container.
+// =========================
+// CONTROLLERS
+// =========================
+
 builder.Services.AddControllers();
+
+// =========================
+// DATABASE
+// =========================
+
+var connectionString =
+    builder.Configuration.GetConnectionString("DefaultConnection");
+
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException(
+        "Database connection string is missing."
+    );
+}
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseMySql(
-        builder.Configuration.GetConnectionString("DefaultConnection"),
-        ServerVersion.AutoDetect(builder.Configuration.GetConnectionString("DefaultConnection"))
-    ));
+        connectionString,
+        ServerVersion.AutoDetect(connectionString)
+    )
+);
+
+// =========================
+// SERVICES
+// =========================
 
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddHttpClient<EmailService>();
+
+// =========================
+// JWT
+// =========================
 
 var jwtKey = builder.Configuration["Jwt:Key"];
 var jwtIssuer = builder.Configuration["Jwt:Issuer"];
 var jwtAudience = builder.Configuration["Jwt:Audience"];
 
+if (string.IsNullOrWhiteSpace(jwtKey))
+{
+    throw new InvalidOperationException(
+        "JWT Key is missing."
+    );
+}
+
 builder.Services.AddAuthentication(options =>
 {
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultAuthenticateScheme =
+        JwtBearerDefaults.AuthenticationScheme;
+
+    options.DefaultChallengeScheme =
+        JwtBearerDefaults.AuthenticationScheme;
 })
 .AddJwtBearer(options =>
 {
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        ValidateIssuer = true,
-        ValidateAudience = true,
-        ValidateLifetime = true,
-        ValidateIssuerSigningKey = true,
-        ValidIssuer = jwtIssuer,
-        ValidAudience = jwtAudience,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey!))
-    };
+    options.TokenValidationParameters =
+        new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+
+            ValidIssuer = jwtIssuer,
+            ValidAudience = jwtAudience,
+
+            IssuerSigningKey =
+                new SymmetricSecurityKey(
+                    Encoding.UTF8.GetBytes(jwtKey)
+                )
+        };
 });
 
-// Allow Angular (localhost:4200) to call this API
+// =========================
+// CORS
+// =========================
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAngularApp", policy =>
     {
-          policy.WithOrigins(
+        policy.WithOrigins(
                 "http://localhost:4200",
                 "https://sync-up-jade-one.vercel.app"
-              )
-              .AllowAnyHeader()
-              .AllowAnyMethod();
+            )
+            .AllowAnyHeader()
+            .AllowAnyMethod();
     });
 });
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-app.UseForwardedHeaders(new ForwardedHeadersOptions
-{
-    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
-});
+// =========================
+// FORWARDED HEADERS
+// =========================
 
-// TLS terminates at Railway's proxy. Redirecting the internal HTTP request in
-// production can create a redirect loop, so only redirect on local development.
+app.UseForwardedHeaders(
+    new ForwardedHeadersOptions
+    {
+        ForwardedHeaders =
+            ForwardedHeaders.XForwardedFor |
+            ForwardedHeaders.XForwardedProto
+    }
+);
+
+// =========================
+// HTTPS
+// =========================
+
 if (app.Environment.IsDevelopment())
 {
     app.UseHttpsRedirection();
 }
+
+// =========================
+// MIDDLEWARE
+// =========================
 
 app.UseCors("AllowAngularApp");
 
 app.UseAuthentication();
 app.UseAuthorization();
 
+// =========================
+// ENDPOINTS
+// =========================
+
 app.MapControllers();
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+
+app.MapGet(
+    "/health",
+    () => Results.Ok(
+        new
+        {
+            status = "ok"
+        }
+    )
+);
 
 app.Run();
