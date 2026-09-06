@@ -1,4 +1,5 @@
 ﻿using System.Net.Http.Json;
+using System.Text.Encodings.Web;
 
 namespace MeetingScheduler.API.Services
 {
@@ -117,6 +118,82 @@ namespace MeetingScheduler.API.Services
 
                 throw;
             }
+        }
+
+        public async Task SendMeetingRescheduledEmailAsync(
+            string toEmail,
+            string recipientName,
+            string meetingTitle,
+            DateTime? meetingDate,
+            TimeSpan? meetingTime)
+        {
+            var subject = $"Meeting rescheduled: {meetingTitle}";
+            var body = BuildMeetingStatusEmailBody(
+                recipientName,
+                meetingTitle,
+                meetingDate,
+                meetingTime,
+                "has been rescheduled.");
+
+            await SendEmailAsync(toEmail, subject, body);
+        }
+
+        public async Task SendMeetingCancelledEmailAsync(
+            string toEmail,
+            string recipientName,
+            string meetingTitle,
+            DateTime? meetingDate,
+            TimeSpan? meetingTime)
+        {
+            var subject = $"Meeting cancelled: {meetingTitle}";
+            var body = BuildMeetingStatusEmailBody(
+                recipientName,
+                meetingTitle,
+                meetingDate,
+                meetingTime,
+                "has been cancelled.");
+
+            await SendEmailAsync(toEmail, subject, body);
+        }
+
+        private static string BuildMeetingStatusEmailBody(
+            string recipientName,
+            string meetingTitle,
+            DateTime? meetingDate,
+            TimeSpan? meetingTime,
+            string statusText)
+        {
+            var safeName = HtmlEncoder.Default.Encode(
+                string.IsNullOrWhiteSpace(recipientName)
+                    ? "there"
+                    : recipientName);
+
+            var safeTitle = HtmlEncoder.Default.Encode(meetingTitle);
+            var dateText = meetingDate?.ToString("MMMM dd, yyyy") ?? "TBD";
+            var timeText = meetingTime?.ToString(@"hh\:mm") ?? "TBD";
+
+            return $@"
+            <h2>Hi {safeName},</h2>
+
+            <p>
+                Meeting <strong>{safeTitle}</strong> {statusText}
+            </p>
+
+            <p>
+                <strong>Date:</strong> {dateText}
+            </p>
+
+            <p>
+                <strong>Time:</strong> {timeText}
+            </p>
+
+            <br>
+
+            <p>
+                Thanks,<br>
+                <strong>SyncUp Team</strong>
+            </p>
+            ";
         }
     }
 }

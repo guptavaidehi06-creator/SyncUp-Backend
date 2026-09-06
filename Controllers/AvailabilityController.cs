@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using MeetingScheduler.API.Data;
 using MeetingScheduler.API.Models;
+using MeetingScheduler.API.Services;
 
 namespace MeetingScheduler.API.Controllers
 {
@@ -10,10 +11,14 @@ namespace MeetingScheduler.API.Controllers
     public class AvailabilityController : ControllerBase
     {
         private readonly AppDbContext _context;
+        private readonly NotificationService _notificationService;
 
-        public AvailabilityController(AppDbContext context)
+        public AvailabilityController(
+            AppDbContext context,
+            NotificationService notificationService)
         {
             _context = context;
+            _notificationService = notificationService;
         }
 
         [HttpGet]
@@ -66,6 +71,17 @@ namespace MeetingScheduler.API.Controllers
             _context.Availabilities.Add(availability);
 
             await _context.SaveChangesAsync();
+
+            try
+            {
+                await _notificationService.NotifyAvailabilitySubmittedAsync(
+                    availability);
+            }
+            catch
+            {
+                // Availability is already saved. Notification failure
+                // should not fail the submit request.
+            }
 
             return Created(
                 "api/availability/" + availability.Id,

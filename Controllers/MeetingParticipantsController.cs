@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MeetingScheduler.API.Data;
 using MeetingScheduler.API.Models;
@@ -6,37 +7,78 @@ using MeetingScheduler.API.Services;
 
 namespace MeetingScheduler.API.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("api/[controller]")]
     public class MeetingParticipantsController : ControllerBase
     {
         private readonly AppDbContext _context;
         private readonly EmailService _emailService;
+        private readonly NotificationService _notificationService;
         private readonly IConfiguration _configuration;
-    public MeetingParticipantsController(
-        AppDbContext context,
-        EmailService emailService,
-        IConfiguration configuration)
+
+        public MeetingParticipantsController(
+            AppDbContext context,
+            EmailService emailService,
+            NotificationService notificationService,
+            IConfiguration configuration)
         {
             _context = context;
             _emailService = emailService;
+            _notificationService = notificationService;
             _configuration = configuration;
         }
 
-        // GET: api/meetingparticipants
         [HttpGet]
         public async Task<IActionResult> GetAllParticipants()
         {
+            var currentUserId = User.GetUserId();
+
+            if (currentUserId == null)
+            {
+                return Unauthorized();
+            }
+
+            if (User.IsAdmin())
+            {
+                var allParticipants = await _context.MeetingParticipants
+                    .ToListAsync();
+
+                return Ok(allParticipants);
+            }
+
             var participants = await _context.MeetingParticipants
+                .Where(p => _context.MeetingParticipants.Any(mine =>
+                    mine.UserId == currentUserId.Value &&
+                    mine.MeetingId == p.MeetingId))
                 .ToListAsync();
 
             return Ok(participants);
         }
 
-        // GET: api/meetingparticipants/meeting/1
         [HttpGet("meeting/{meetingId}")]
         public async Task<IActionResult> GetParticipantsByMeeting(int meetingId)
         {
+            var currentUserId = User.GetUserId();
+
+            if (currentUserId == null)
+            {
+                return Unauthorized();
+            }
+
+            if (!User.IsAdmin())
+            {
+                var isParticipant = await _context.MeetingParticipants
+                    .AnyAsync(p =>
+                        p.MeetingId == meetingId &&
+                        p.UserId == currentUserId.Value);
+
+                if (!isParticipant)
+                {
+                    return NotFound("Meeting not found");
+                }
+            }
+
             var participants = await _context.MeetingParticipants
                 .Where(p => p.MeetingId == meetingId)
                 .ToListAsync();
@@ -44,11 +86,49 @@ namespace MeetingScheduler.API.Controllers
             return Ok(participants);
         }
 
-        // POST: api/meetingparticipants
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetParticipantById(int id)
+        {
+            var currentUserId = User.GetUserId();
+
+            if (currentUserId == null)
+            {
+                return Unauthorized();
+            }
+
+            var participant = await _context.MeetingParticipants
+                .FindAsync(id);
+
+            if (participant == null)
+            {
+                return NotFound("Participant not found");
+            }
+
+            if (!User.IsAdmin())
+            {
+                var canAccess = await _context.MeetingParticipants
+                    .AnyAsync(p =>
+                        p.MeetingId == participant.MeetingId &&
+                        p.UserId == currentUserId.Value);
+
+                if (!canAccess)
+                {
+                    return NotFound("Participant not found");
+                }
+            }
+
+            return Ok(participant);
+        }
+
         [HttpPost]
         public async Task<IActionResult> AddParticipant(
             MeetingParticipant participant)
         {
+            if (!User.IsAdmin())
+            {
+                return Forbid();
+            }
+
             // Check if user exists
             var user = await _context.Users
                 .FindAsync(participant.UserId);
@@ -84,6 +164,30 @@ namespace MeetingScheduler.API.Controllers
             _context.MeetingParticipants.Add(participant);
 
             await _context.SaveChangesAsync();
+
+            var meetingTitle = meeting.Title ?? "a meeting";
+            var requiresAvailability =
+                !meeting.MeetingTime.HasValue ||
+                meeting.MeetingTime.Value == TimeSpan.Zero;
+            var notificationMessage = requiresAvailability
+                ? $"You were added to {meetingTitle}. Please submit your availability."
+                : $"You were added to {meetingTitle}.";
+
+            if (user.Id is > 0)
+            {
+                try
+                {
+                    await _notificationService.NotifyUsersAsync(
+                        new[] { user.Id.Value },
+                        "Added to Meeting",
+                        notificationMessage,
+                        meeting.Id,
+                        "Participant");
+                }
+                catch
+                {
+                }
+            }
 
             // Get frontend URL from Railway environment variable
             var clientBaseUrl = _configuration["Client:BaseUrl"];
@@ -191,6 +295,11 @@ namespace MeetingScheduler.API.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteParticipant(int id)
         {
+            if (!User.IsAdmin())
+            {
+                return Forbid();
+            }
+
             var participant = await _context.MeetingParticipants
                 .FindAsync(id);
 

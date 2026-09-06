@@ -48,6 +48,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // =========================
 
 builder.Services.AddScoped<JwtService>();
+builder.Services.AddScoped<NotificationService>();
 builder.Services.AddHttpClient<EmailService>();
 
 // =========================

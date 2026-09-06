@@ -46,15 +46,18 @@ public class LoginRequest
         private readonly AppDbContext _context;
         private readonly JwtService _jwtService;
         private readonly EmailService _emailService;
+        private readonly NotificationService _notificationService;
 
         public AuthController(
             AppDbContext context,
             JwtService jwtService,
-            EmailService emailService)
+            EmailService emailService,
+            NotificationService notificationService)
         {
             _context = context;
             _jwtService = jwtService;
             _emailService = emailService;
+            _notificationService = notificationService;
         }
 
 
@@ -227,6 +230,17 @@ public class LoginRequest
             user.VerificationCodeExpiry = null;
 
             await _context.SaveChangesAsync();
+
+            try
+            {
+                await _notificationService.NotifyWelcomeAsync(user);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(
+                    $"WELCOME NOTIFICATION ERROR: {ex.Message}"
+                );
+            }
 
             var token =
                 _jwtService.GenerateToken(user);
