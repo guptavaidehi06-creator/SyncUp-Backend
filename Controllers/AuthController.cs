@@ -72,7 +72,9 @@ public class LoginRequest
             if (existingUser != null)
             {
                 return BadRequest(
-                    "An account with this email already exists."
+                    existingUser.IsVerified
+                        ? "An account with this email already exists. Please log in."
+                        : "An account with this email already exists but is not verified. Please verify your email or resend the verification code."
                 );
             }
 
