@@ -7,6 +7,13 @@ using MeetingScheduler.API.Services;
 
 namespace MeetingScheduler.API.Controllers
 {
+    public class CreateMeetingRequest
+    {
+        public string? Title { get; set; }
+        public DateTime? MeetingDate { get; set; }
+        public string? Priority { get; set; }
+    }
+
     [Authorize]
     [ApiController]
     [Route("api/[controller]")]
@@ -82,12 +89,41 @@ namespace MeetingScheduler.API.Controllers
         }
 
         [HttpPost]
-        public async Task<IActionResult> AddMeeting(Meeting meeting)
+        public async Task<IActionResult> AddMeeting(CreateMeetingRequest request)
         {
             if (!User.IsAdmin())
             {
                 return Forbid();
             }
+
+            var currentUserId = User.GetUserId();
+            if (currentUserId == null)
+            {
+                return Unauthorized();
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Title))
+            {
+                return BadRequest("Meeting title is required.");
+            }
+
+            if (!request.MeetingDate.HasValue)
+            {
+                return BadRequest("A preferred meeting date is required.");
+            }
+
+            var meeting = new Meeting
+            {
+                Title = request.Title.Trim(),
+                MeetingDate = request.MeetingDate.Value.Date,
+                // New meetings are availability-based. Keep this null so the
+                // scheduler can determine the final time from responses.
+                MeetingTime = null,
+                Priority = request.Priority ?? "Medium",
+                Status = "Upcoming",
+                CreatedBy = currentUserId.Value
+            };
+
             _context.Meetings.Add(meeting);
             await _context.SaveChangesAsync();
 
