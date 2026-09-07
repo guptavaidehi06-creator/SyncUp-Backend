@@ -7,6 +7,13 @@ using MeetingScheduler.API.Services;
 
 namespace MeetingScheduler.API.Controllers
 {
+    public class AddMeetingParticipantRequest
+    {
+        public int? MeetingId { get; set; }
+        public int? UserId { get; set; }
+        public bool IsMandatory { get; set; } = true;
+    }
+
     [Authorize]
     [ApiController]
     [Route("api/[controller]")]
@@ -122,7 +129,7 @@ namespace MeetingScheduler.API.Controllers
 
         [HttpPost]
         public async Task<IActionResult> AddParticipant(
-            MeetingParticipant participant)
+            AddMeetingParticipantRequest request)
         {
             if (!User.IsAdmin())
             {
@@ -131,16 +138,25 @@ namespace MeetingScheduler.API.Controllers
 
             // Check if user exists
             var user = await _context.Users
-                .FindAsync(participant.UserId);
+                .FindAsync(request.UserId);
 
             if (user == null)
             {
-                return NotFound("User not found");
+                return NotFound(
+                    "User is not registered. Please ask them to create an account first."
+                );
+            }
+
+            if (!user.IsVerified)
+            {
+                return BadRequest(
+                    "User has not verified their account yet. Please complete email verification first."
+                );
             }
 
             // Check if meeting exists
             var meeting = await _context.Meetings
-                .FindAsync(participant.MeetingId);
+                .FindAsync(request.MeetingId);
 
             if (meeting == null)
             {
@@ -150,8 +166,8 @@ namespace MeetingScheduler.API.Controllers
             // Check if participant is already added
             var alreadyAdded = await _context.MeetingParticipants
                 .AnyAsync(p =>
-                    p.MeetingId == participant.MeetingId &&
-                    p.UserId == participant.UserId);
+                    p.MeetingId == request.MeetingId &&
+                    p.UserId == request.UserId);
 
             if (alreadyAdded)
             {
@@ -160,7 +176,14 @@ namespace MeetingScheduler.API.Controllers
                 );
             }
 
-            // FIRST save participant successfully
+            var participant = new MeetingParticipant
+            {
+                MeetingId = request.MeetingId,
+                UserId = request.UserId,
+                IsMandatory = request.IsMandatory
+            };
+
+            // The participant is persisted only after the registered and verified checks above.
             _context.MeetingParticipants.Add(participant);
 
             await _context.SaveChangesAsync();
@@ -260,7 +283,7 @@ namespace MeetingScheduler.API.Controllers
             try
             {
                 await _emailService.SendEmailAsync(
-                    user.Email,
+                    user.Email!,
                     subject,
                     body
                 );
@@ -275,7 +298,7 @@ namespace MeetingScheduler.API.Controllers
                     }
                 );
             }
-            catch (Exception ex)
+            catch
             {
                 // IMPORTANT:
                 // Participant is already added successfully.
@@ -285,8 +308,7 @@ namespace MeetingScheduler.API.Controllers
                 {
                     participant,
                     message =
-                        "Participant added successfully, but invitation email could not be sent.",
-                    emailError = ex.Message
+                        "Participant added successfully, but invitation email could not be sent."
                 });
             }
         }

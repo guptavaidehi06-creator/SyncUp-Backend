@@ -7,6 +7,7 @@ namespace MeetingScheduler.API.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Microsoft.AspNetCore.Authorization.Authorize]
     public class UsersController : ControllerBase
     {
         private readonly AppDbContext _context;
@@ -19,13 +20,31 @@ namespace MeetingScheduler.API.Controllers
         [HttpGet]
         public async Task<IActionResult> GetAllUsers()
         {
-            var users = await _context.Users.ToListAsync();
+            if (!MeetingScheduler.API.Services.ClaimsPrincipalExtensions.IsAdmin(User))
+            {
+                return Forbid();
+            }
+
+            var users = await _context.Users
+                .Where(user => user.IsVerified)
+                .Select(user => new
+                {
+                    user.Id,
+                    user.Name,
+                    user.Email
+                })
+                .ToListAsync();
             return Ok(users);
         }
 
         [HttpGet("{id}")]
         public async Task<IActionResult> GetUserById(int id)
         {
+            if (!MeetingScheduler.API.Services.ClaimsPrincipalExtensions.IsAdmin(User))
+            {
+                return Forbid();
+            }
+
             var user = await _context.Users.FindAsync(id);
 
             if (user == null)
@@ -33,21 +52,38 @@ namespace MeetingScheduler.API.Controllers
                 return NotFound("User not found");
             }
 
-            return Ok(user);
+            return Ok(new
+            {
+                user.Id,
+                user.Name,
+                user.Email,
+                user.IsVerified,
+                user.IsAdmin,
+                user.CreatedAt
+            });
         }
 
         [HttpPost]
         public async Task<IActionResult> AddUser(User user)
         {
-            _context.Users.Add(user);
-            await _context.SaveChangesAsync();
+            if (!MeetingScheduler.API.Services.ClaimsPrincipalExtensions.IsAdmin(User))
+            {
+                return Forbid();
+            }
 
-            return Created("api/users/" + user.Id, user);
+            return BadRequest(
+                "Please create accounts through the signup flow."
+            );
         }
 
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateUser(int id, User updatedUser)
         {
+            if (!MeetingScheduler.API.Services.ClaimsPrincipalExtensions.IsAdmin(User))
+            {
+                return Forbid();
+            }
+
             var user = await _context.Users.FindAsync(id);
 
             if (user == null)
@@ -61,12 +97,25 @@ namespace MeetingScheduler.API.Controllers
 
             await _context.SaveChangesAsync();
 
-            return Ok(user);
+            return Ok(new
+            {
+                user.Id,
+                user.Name,
+                user.Email,
+                user.IsVerified,
+                user.IsAdmin,
+                user.CreatedAt
+            });
         }
 
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteUser(int id)
         {
+            if (!MeetingScheduler.API.Services.ClaimsPrincipalExtensions.IsAdmin(User))
+            {
+                return Forbid();
+            }
+
             var user = await _context.Users.FindAsync(id);
 
             if (user == null)
@@ -83,6 +132,11 @@ namespace MeetingScheduler.API.Controllers
         [HttpPost("make-admin/{id}")]
         public async Task<IActionResult> MakeAdmin(int id)
         {
+            if (!MeetingScheduler.API.Services.ClaimsPrincipalExtensions.IsAdmin(User))
+            {
+                return Forbid();
+            }
+
             var user = await _context.Users.FindAsync(id);
             if (user == null)
             {

@@ -66,18 +66,11 @@ public class LoginRequest
         [HttpPost("register")]
         public async Task<IActionResult> Register(RegisterRequest request)
         {
-            Console.WriteLine("=== REGISTER REQUEST ===");
-            Console.WriteLine($"Name: {request.Name}");
-            Console.WriteLine($"Email: {request.Email}");
-            Console.WriteLine($"Password Length: {request.Password?.Length}");
-
             var existingUser = await _context.Users
                 .FirstOrDefaultAsync(u => u.Email == request.Email);
 
             if (existingUser != null)
             {
-                Console.WriteLine("ERROR: Email already exists");
-
                 return BadRequest(
                     "An account with this email already exists."
                 );
@@ -88,8 +81,6 @@ public class LoginRequest
                 string.IsNullOrWhiteSpace(request.Password) ||
                 request.Password.Length < 8)
             {
-                Console.WriteLine("ERROR: Validation failed");
-
                 return BadRequest(
                     "Name, email, and password of at least 8 characters are required."
                 );
@@ -128,14 +119,14 @@ public class LoginRequest
 
                 return StatusCode(
                     StatusCodes.Status503ServiceUnavailable,
-                    "Your account was created, but we could not send the verification email."
+                    "Account created, but we couldn't send the verification email. Please try again."
                 );
             }
 
             return Ok(new
             {
                 message =
-                    "Registered successfully. Please check your email for a verification code.",
+                    "Account created successfully! Verification code sent to your email.",
 
                 email = user.Email
             });
@@ -290,6 +281,13 @@ public class LoginRequest
 
             if (user == null || !passwordValid)
             {
+                if (user == null)
+                {
+                    return NotFound(
+                        "Account not found. Please sign up first."
+                    );
+                }
+
                 return Unauthorized(
                     "Invalid email or password."
                 );
