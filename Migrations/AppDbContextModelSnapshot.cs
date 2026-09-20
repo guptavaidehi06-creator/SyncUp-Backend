@@ -78,6 +78,12 @@ namespace MeetingScheduler.API.Migrations
                     b.Property<TimeSpan?>("MeetingTime")
                         .HasColumnType("time(6)");
 
+                    b.Property<int?>("DurationMinutes")
+                        .HasColumnType("int");
+
+                    b.Property<TimeSpan?>("MeetingEndTime")
+                        .HasColumnType("time(6)");
+
                     b.Property<string>("Priority")
                         .HasColumnType("longtext");
 

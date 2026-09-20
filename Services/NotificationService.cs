@@ -7,6 +7,7 @@ namespace MeetingScheduler.API.Services
     public enum MeetingEmailKind
     {
         None,
+        Confirmed,
         Rescheduled,
         Cancelled
     }
@@ -214,7 +215,18 @@ namespace MeetingScheduler.API.Services
 
                 try
                 {
-                    if (emailKind == MeetingEmailKind.Rescheduled)
+                    if (emailKind == MeetingEmailKind.Confirmed)
+                    {
+                        await _emailService.SendMeetingConfirmedEmailAsync(
+                            user.Email,
+                            user.Name ?? "there",
+                            meeting.Title ?? "your meeting",
+                            meeting.MeetingDate,
+                            meeting.MeetingTime,
+                            meeting.MeetingEndTime,
+                            meeting.DurationMinutes);
+                    }
+                    else if (emailKind == MeetingEmailKind.Rescheduled)
                     {
                         await _emailService.SendMeetingRescheduledEmailAsync(
                             user.Email,

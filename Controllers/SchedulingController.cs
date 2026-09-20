@@ -1,28 +1,48 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authorization;
 using MeetingScheduler.API.Data;
+using MeetingScheduler.API.Services;
 
 namespace MeetingScheduler.API.Controllers
 {
     public class SuggestSlotRequest
     {
         public int MeetingId { get; set; }
+        public int DurationMinutes { get; set; }
     }
 
+    public class ConfirmSlotRequest
+    {
+        public int MeetingId { get; set; }
+        public DateTime MeetingDate { get; set; }
+        public TimeSpan StartTime { get; set; }
+        public TimeSpan EndTime { get; set; }
+        public int DurationMinutes { get; set; }
+    }
+
+    [Authorize]
     [ApiController]
     [Route("api/[controller]")]
     public class SchedulingController : ControllerBase
     {
         private readonly AppDbContext _context;
+        private readonly NotificationService _notificationService;
 
-        public SchedulingController(AppDbContext context)
+        public SchedulingController(AppDbContext context, NotificationService notificationService)
         {
             _context = context;
+            _notificationService = notificationService;
         }
 
         [HttpPost("suggest")]
         public async Task<IActionResult> SuggestSlot(SuggestSlotRequest request)
         {
+            if (request.DurationMinutes <= 0 || request.DurationMinutes > 24 * 60)
+            {
+                return BadRequest("A valid meeting duration is required.");
+            }
+
             var meeting = await _context.Meetings.FindAsync(request.MeetingId);
             if (meeting == null || meeting.MeetingDate == null)
             {
@@ -85,14 +105,15 @@ namespace MeetingScheduler.API.Controllers
                 .ToList();
             TimeSpan? bestStart = null;
             TimeSpan? bestEnd = null;
+            var duration = TimeSpan.FromMinutes(request.DurationMinutes);
 
             foreach (var start in validRanges.Select(a => a.StartTime!.Value).Distinct())
-            foreach (var end in validRanges.Select(a => a.EndTime!.Value).Distinct())
             {
-                if (start >= end) continue;
+                var end = start + duration;
+                if (end > TimeSpan.FromDays(1)) continue;
                 var everyoneCanAttend = mandatoryUserIds.All(userId => validRanges.Any(a =>
                     a.UserId == userId && a.StartTime <= start && a.EndTime >= end));
-                if (everyoneCanAttend && (!bestStart.HasValue || end - start > bestEnd!.Value - bestStart.Value))
+                if (everyoneCanAttend && (!bestStart.HasValue || start < bestStart.Value))
                 {
                     bestStart = start;
                     bestEnd = end;
@@ -127,10 +148,70 @@ namespace MeetingScheduler.API.Controllers
                 meetingDate,
                 suggestedStartTime = bestStart,
                 suggestedEndTime = bestEnd,
+                durationMinutes = request.DurationMinutes,
                 mandatoryAttendees = mandatoryUserIds,
                 optionalAttendeesWhoCanJoin = optionalAttendeeIds,
                 message = "Common time slot found for all mandatory participants."
             });
+        }
+
+        [HttpPost("confirm")]
+        public async Task<IActionResult> ConfirmSlot(ConfirmSlotRequest request)
+        {
+            if (!User.IsAdmin()) return Forbid();
+
+            if (request.DurationMinutes <= 0 || request.EndTime <= request.StartTime ||
+                request.EndTime - request.StartTime != TimeSpan.FromMinutes(request.DurationMinutes))
+            {
+                return BadRequest("The confirmed start time, end time, and duration must match.");
+            }
+
+            var meeting = await _context.Meetings.FindAsync(request.MeetingId);
+            if (meeting == null || !meeting.MeetingDate.HasValue ||
+                meeting.MeetingDate.Value.Date != request.MeetingDate.Date)
+            {
+                return BadRequest("The confirmed date must match the meeting date.");
+            }
+
+            var mandatoryUserIds = await _context.MeetingParticipants
+                .Where(p => p.MeetingId == request.MeetingId && p.IsMandatory && p.UserId != null)
+                .Select(p => p.UserId!.Value)
+                .ToListAsync();
+            if (mandatoryUserIds.Count == 0) return BadRequest("No mandatory participants found for this meeting.");
+
+            var meetingDate = meeting.MeetingDate.Value.Date;
+            var dayOfWeek = meetingDate.DayOfWeek.ToString();
+            var ranges = await _context.Availabilities
+                .Where(a => mandatoryUserIds.Contains(a.UserId ?? -1) &&
+                    ((a.SpecificDate.HasValue && a.SpecificDate.Value.Date == meetingDate) ||
+                     (!a.SpecificDate.HasValue && a.DayOfWeek == dayOfWeek)) &&
+                    a.StartTime.HasValue && a.EndTime.HasValue && a.StartTime < a.EndTime)
+                .ToListAsync();
+            var canConfirm = mandatoryUserIds.All(userId => ranges.Any(a =>
+                a.UserId == userId && a.StartTime <= request.StartTime && a.EndTime >= request.EndTime));
+            if (!canConfirm)
+            {
+                return BadRequest("The selected slot is no longer available for all mandatory participants.");
+            }
+
+            meeting.MeetingTime = request.StartTime;
+            meeting.MeetingEndTime = request.EndTime;
+            meeting.DurationMinutes = request.DurationMinutes;
+            meeting.Status = "Scheduled";
+            await _context.SaveChangesAsync();
+
+            try
+            {
+                await _notificationService.NotifyMeetingRecipientsAsync(
+                    meeting,
+                    "Meeting Confirmed",
+                    $"Meeting {meeting.Title ?? "your meeting"} has been confirmed.",
+                    "MeetingConfirmed",
+                    MeetingEmailKind.Confirmed);
+            }
+            catch { }
+
+            return Ok(meeting);
         }
     }
 }

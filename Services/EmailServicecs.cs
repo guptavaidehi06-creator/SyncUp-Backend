@@ -138,6 +138,23 @@ namespace MeetingScheduler.API.Services
             await SendEmailAsync(toEmail, subject, body);
         }
 
+        public async Task SendMeetingConfirmedEmailAsync(
+            string toEmail,
+            string recipientName,
+            string meetingTitle,
+            DateTime? meetingDate,
+            TimeSpan? meetingTime,
+            TimeSpan? meetingEndTime,
+            int? durationMinutes)
+        {
+            var subject = $"Meeting confirmed: {meetingTitle}";
+            var body = BuildMeetingStatusEmailBody(
+                recipientName, meetingTitle, meetingDate, meetingTime,
+                "has been confirmed.", meetingEndTime, durationMinutes);
+
+            await SendEmailAsync(toEmail, subject, body);
+        }
+
         public async Task SendMeetingCancelledEmailAsync(
             string toEmail,
             string recipientName,
@@ -161,7 +178,9 @@ namespace MeetingScheduler.API.Services
             string meetingTitle,
             DateTime? meetingDate,
             TimeSpan? meetingTime,
-            string statusText)
+            string statusText,
+            TimeSpan? meetingEndTime = null,
+            int? durationMinutes = null)
         {
             var safeName = HtmlEncoder.Default.Encode(
                 string.IsNullOrWhiteSpace(recipientName)
@@ -171,6 +190,14 @@ namespace MeetingScheduler.API.Services
             var safeTitle = HtmlEncoder.Default.Encode(meetingTitle);
             var dateText = meetingDate?.ToString("MMMM dd, yyyy") ?? "TBD";
             var timeText = meetingTime?.ToString(@"hh\:mm") ?? "TBD";
+            if (meetingEndTime.HasValue)
+            {
+                timeText += $" - {meetingEndTime.Value:hh\\:mm}";
+            }
+
+            var durationText = durationMinutes is > 0
+                ? $"<p><strong>Duration:</strong> {durationMinutes} minutes</p>"
+                : string.Empty;
 
             return $@"
             <h2>Hi {safeName},</h2>
@@ -186,6 +213,8 @@ namespace MeetingScheduler.API.Services
             <p>
                 <strong>Time:</strong> {timeText}
             </p>
+
+            {durationText}
 
             <br>
 

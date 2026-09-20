@@ -170,6 +170,8 @@ namespace MeetingScheduler.API.Controllers
             meeting.Title = updatedMeeting.Title;
             meeting.MeetingDate = updatedMeeting.MeetingDate;
             meeting.MeetingTime = updatedMeeting.MeetingTime;
+            meeting.MeetingEndTime = updatedMeeting.MeetingEndTime;
+            meeting.DurationMinutes = updatedMeeting.DurationMinutes;
             meeting.Priority = updatedMeeting.Priority;
             meeting.Status = updatedMeeting.Status;
 

@@ -6,6 +6,8 @@ namespace MeetingScheduler.API.Models
         public string? Title { get; set; }
         public DateTime? MeetingDate { get; set; }
         public TimeSpan? MeetingTime { get; set; }
+        public TimeSpan? MeetingEndTime { get; set; }
+        public int? DurationMinutes { get; set; }
         public string? Priority { get; set; } = "Medium";
         public string? Status { get; set; } = "Scheduled";
         public int? CreatedBy { get; set; }

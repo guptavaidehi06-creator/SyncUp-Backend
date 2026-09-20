@@ -68,6 +68,12 @@ namespace MeetingScheduler.API.Controllers
         public async Task<IActionResult> AddAvailability(
             Availability availability)
         {
+            var validationError = ValidateTimeRange(availability);
+            if (validationError != null)
+            {
+                return BadRequest(validationError);
+            }
+
             _context.Availabilities.Add(availability);
 
             await _context.SaveChangesAsync();
@@ -94,6 +100,12 @@ namespace MeetingScheduler.API.Controllers
             int id,
             Availability updatedAvailability)
         {
+            var validationError = ValidateTimeRange(updatedAvailability);
+            if (validationError != null)
+            {
+                return BadRequest(validationError);
+            }
+
             var availability = await _context.Availabilities
                 .FindAsync(id);
 
@@ -143,6 +155,18 @@ namespace MeetingScheduler.API.Controllers
             return Ok(
                 "Availability deleted successfully"
             );
+        }
+
+        private static string? ValidateTimeRange(Availability availability)
+        {
+            if (!availability.StartTime.HasValue || !availability.EndTime.HasValue)
+            {
+                return "Both start time and end time are required.";
+            }
+
+            return availability.EndTime.Value <= availability.StartTime.Value
+                ? "End time must be after start time."
+                : null;
         }
     }
 }
