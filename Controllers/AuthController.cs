@@ -5,6 +5,8 @@ using MeetingScheduler.API.Models;
 using MeetingScheduler.API.Services;
 using System.Security.Cryptography;
 using System.Text.Encodings.Web;
+using System.ComponentModel.DataAnnotations;
+using System.Text.RegularExpressions;
 
 namespace MeetingScheduler.API.Controllers
 {
@@ -66,6 +68,17 @@ public class LoginRequest
         [HttpPost("register")]
         public async Task<IActionResult> Register(RegisterRequest request)
         {
+            if (string.IsNullOrWhiteSpace(request.Name) ||
+                !Regex.IsMatch(request.Name.Trim(), @"^[A-Za-z ]+$"))
+            {
+                return BadRequest("Name can contain only letters and spaces.");
+            }
+
+            if (!new EmailAddressAttribute().IsValid(request.Email))
+            {
+                return BadRequest("A valid email address is required.");
+            }
+
             var existingUser = await _context.Users
                 .FirstOrDefaultAsync(u => u.Email == request.Email);
 
@@ -95,7 +108,7 @@ public class LoginRequest
 
             var user = new User
             {
-                Name = request.Name,
+                Name = request.Name.Trim(),
                 Email = request.Email,
                 Password = hashedPassword,
                 IsAdmin = false,

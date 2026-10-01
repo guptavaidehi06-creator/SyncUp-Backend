@@ -38,6 +38,8 @@ namespace MeetingScheduler.API.Controllers
         [HttpPost("suggest")]
         public async Task<IActionResult> SuggestSlot(SuggestSlotRequest request)
         {
+            if (!User.IsAdmin()) return Forbid();
+
             if (request.DurationMinutes <= 0 || request.DurationMinutes > 24 * 60)
             {
                 return BadRequest("A valid meeting duration is required.");
@@ -47,6 +49,11 @@ namespace MeetingScheduler.API.Controllers
             if (meeting == null || meeting.MeetingDate == null)
             {
                 return BadRequest("A meeting with a date is required to find a slot.");
+            }
+
+            if (IsUnavailableForScheduling(meeting.Status))
+            {
+                return Conflict("This meeting is already scheduled or is no longer eligible for scheduling.");
             }
 
             // Get all participants for this meeting
@@ -75,14 +82,12 @@ namespace MeetingScheduler.API.Controllers
             }
 
             var meetingDate = meeting.MeetingDate.Value.Date;
-            var dayOfWeek = meetingDate.DayOfWeek.ToString();
 
-            // New availability is saved against a specific meeting date. The day-of-week
-            // check retains compatibility with availability records created by older builds.
+            // Availability must belong to this meeting and its exact date.
             var mandatoryAvailabilities = await _context.Availabilities
-                .Where(a => mandatoryUserIds.Contains(a.UserId ?? -1) &&
-                    ((a.SpecificDate.HasValue && a.SpecificDate.Value.Date == meetingDate) ||
-                     (!a.SpecificDate.HasValue && a.DayOfWeek == dayOfWeek)))
+                .Where(a => a.MeetingId == request.MeetingId &&
+                    mandatoryUserIds.Contains(a.UserId ?? -1) &&
+                    a.SpecificDate.HasValue && a.SpecificDate.Value.Date == meetingDate)
                 .ToListAsync();
 
             var usersWithAvailability = mandatoryAvailabilities.Select(a => a.UserId).Distinct().ToList();
@@ -132,9 +137,9 @@ namespace MeetingScheduler.API.Controllers
 
             // Check how many optional participants can also attend
             var optionalAvailabilities = await _context.Availabilities
-                .Where(a => optionalUserIds.Contains(a.UserId ?? -1) &&
-                    ((a.SpecificDate.HasValue && a.SpecificDate.Value.Date == meetingDate) ||
-                     (!a.SpecificDate.HasValue && a.DayOfWeek == dayOfWeek)))
+                .Where(a => a.MeetingId == request.MeetingId &&
+                    optionalUserIds.Contains(a.UserId ?? -1) &&
+                    a.SpecificDate.HasValue && a.SpecificDate.Value.Date == meetingDate)
                 .ToListAsync();
 
             var optionalAttendeeIds = optionalAvailabilities
@@ -160,7 +165,8 @@ namespace MeetingScheduler.API.Controllers
         {
             if (!User.IsAdmin()) return Forbid();
 
-            if (request.DurationMinutes <= 0 || request.EndTime <= request.StartTime ||
+            if (request.DurationMinutes <= 0 || request.StartTime < TimeSpan.Zero ||
+                request.EndTime > TimeSpan.FromDays(1) || request.EndTime <= request.StartTime ||
                 request.EndTime - request.StartTime != TimeSpan.FromMinutes(request.DurationMinutes))
             {
                 return BadRequest("The confirmed start time, end time, and duration must match.");
@@ -173,6 +179,16 @@ namespace MeetingScheduler.API.Controllers
                 return BadRequest("The confirmed date must match the meeting date.");
             }
 
+            if (meeting.MeetingDate.Value.Date <= DateTime.UtcNow.Date)
+            {
+                return BadRequest("The meeting date must be tomorrow or later.");
+            }
+
+            if (IsUnavailableForScheduling(meeting.Status))
+            {
+                return Conflict("This meeting has already been scheduled or is no longer eligible for confirmation.");
+            }
+
             var mandatoryUserIds = await _context.MeetingParticipants
                 .Where(p => p.MeetingId == request.MeetingId && p.IsMandatory && p.UserId != null)
                 .Select(p => p.UserId!.Value)
@@ -180,11 +196,10 @@ namespace MeetingScheduler.API.Controllers
             if (mandatoryUserIds.Count == 0) return BadRequest("No mandatory participants found for this meeting.");
 
             var meetingDate = meeting.MeetingDate.Value.Date;
-            var dayOfWeek = meetingDate.DayOfWeek.ToString();
             var ranges = await _context.Availabilities
-                .Where(a => mandatoryUserIds.Contains(a.UserId ?? -1) &&
-                    ((a.SpecificDate.HasValue && a.SpecificDate.Value.Date == meetingDate) ||
-                     (!a.SpecificDate.HasValue && a.DayOfWeek == dayOfWeek)) &&
+                .Where(a => a.MeetingId == request.MeetingId &&
+                    mandatoryUserIds.Contains(a.UserId ?? -1) &&
+                    a.SpecificDate.HasValue && a.SpecificDate.Value.Date == meetingDate &&
                     a.StartTime.HasValue && a.EndTime.HasValue && a.StartTime < a.EndTime)
                 .ToListAsync();
             var canConfirm = mandatoryUserIds.All(userId => ranges.Any(a =>
@@ -212,6 +227,14 @@ namespace MeetingScheduler.API.Controllers
             catch { }
 
             return Ok(meeting);
+        }
+
+        private static bool IsUnavailableForScheduling(string? status)
+        {
+            return string.Equals(status, "Scheduled", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, "Confirmed", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

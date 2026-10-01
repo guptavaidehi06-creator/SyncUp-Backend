@@ -112,6 +112,11 @@ namespace MeetingScheduler.API.Controllers
                 return BadRequest("A preferred meeting date is required.");
             }
 
+            if (request.MeetingDate.Value.Date <= DateTime.UtcNow.Date)
+            {
+                return BadRequest("Meeting date must be tomorrow or later.");
+            }
+
             var meeting = new Meeting
             {
                 Title = request.Title.Trim(),
@@ -166,6 +171,20 @@ namespace MeetingScheduler.API.Controllers
             var previousStatus = meeting.Status;
             var previousDate = meeting.MeetingDate;
             var previousTime = meeting.MeetingTime;
+            var isRescheduledStatus = string.Equals(
+                updatedMeeting.Status,
+                "Rescheduled",
+                StringComparison.OrdinalIgnoreCase);
+            var dateChanged = previousDate?.Date != updatedMeeting.MeetingDate?.Date;
+
+            if (dateChanged || isRescheduledStatus)
+            {
+                if (!updatedMeeting.MeetingDate.HasValue ||
+                    updatedMeeting.MeetingDate.Value.Date <= DateTime.UtcNow.Date)
+                {
+                    return BadRequest("Meeting date must be tomorrow or later.");
+                }
+            }
 
             meeting.Title = updatedMeeting.Title;
             meeting.MeetingDate = updatedMeeting.MeetingDate;
@@ -174,6 +193,18 @@ namespace MeetingScheduler.API.Controllers
             meeting.DurationMinutes = updatedMeeting.DurationMinutes;
             meeting.Priority = updatedMeeting.Priority;
             meeting.Status = updatedMeeting.Status;
+
+            if (isRescheduledStatus)
+            {
+                meeting.MeetingTime = null;
+                meeting.MeetingEndTime = null;
+                meeting.DurationMinutes = null;
+
+                var oldAvailability = await _context.Availabilities
+                    .Where(availability => availability.MeetingId == id)
+                    .ToListAsync();
+                _context.Availabilities.RemoveRange(oldAvailability);
+            }
 
             await _context.SaveChangesAsync();
 
@@ -185,10 +216,6 @@ namespace MeetingScheduler.API.Controllers
             var isCancelled = string.Equals(
                 meeting.Status,
                 "Cancelled",
-                StringComparison.OrdinalIgnoreCase);
-            var isRescheduledStatus = string.Equals(
-                meeting.Status,
-                "Rescheduled",
                 StringComparison.OrdinalIgnoreCase);
             var scheduleChanged =
                 previousDate != meeting.MeetingDate ||
